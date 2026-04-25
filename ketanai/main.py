@@ -1,11 +1,11 @@
 import sys
+import threading
 import ollama
 from datetime import datetime
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.rule import Rule
 from rich.text import Text
-from rich.columns import Columns
 
 from .config import load_config, save_config
 from .memory import get_memory
@@ -46,10 +46,16 @@ def _build_prompt(config: dict, messages: list[dict], user_input: str) -> list[d
     results = mem.search(user_input, filters={"user_id": config["user_id"]}, limit=5)
     memories = results.get("results", [])
 
-    system = "You are KetanAI, a sharp personal assistant with long-term memory. Be helpful and concise."
+    system = (
+        "You are KetanAI, a personal assistant with persistent long-term memory. "
+        "You DO have memory of past conversations — facts are retrieved and shown below. "
+        "Never claim you lack memory. If no facts are listed, you simply haven't learned anything yet."
+    )
     if memories:
         facts = "\n".join(f"- {m['memory']}" for m in memories)
-        system += f"\n\nWhat you remember about the user:\n{facts}"
+        system += f"\n\nKnown facts about the user:\n{facts}"
+    else:
+        system += "\n\nNo facts stored yet for this user."
 
     return (
         [{"role": "system", "content": system}]
@@ -148,7 +154,9 @@ def main():
             print()
 
             reply = "".join(reply_chunks)
-            _store_memory(config, user_input, reply)
+            threading.Thread(
+                target=_store_memory, args=(config, user_input, reply), daemon=True
+            ).start()
 
             messages.append({"role": "user", "content": user_input})
             messages.append({"role": "assistant", "content": reply})
