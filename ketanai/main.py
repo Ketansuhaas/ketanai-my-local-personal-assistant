@@ -50,13 +50,7 @@ def _fetch_memories(config: dict, user_input: str) -> str:
     return "\n".join(f"- {f}" for f in facts) if facts else ""
 
 
-def _build_prompt(config: dict, messages: list[dict], user_input: str) -> list[dict]:
-    # fetch memories with a 2s timeout — never block the prompt
-    try:
-        future = _executor.submit(_fetch_memories, config, user_input)
-        facts = future.result(timeout=2.0)
-    except (FuturesTimeout, Exception):
-        facts = ""
+def _build_prompt_with_facts(config: dict, messages: list[dict], user_input: str, facts: str) -> list[dict]:
 
     system = f"""You are KetanAI — a local personal AI assistant built by Ketan.
 
@@ -208,18 +202,29 @@ def main():
             user_input = user_input.lstrip("/")
 
         try:
-            with console.status(
-                "[dim cyan]  ⟳  thinking…[/]", spinner="dots", spinner_style="cyan dim"
-            ):
-                prompt = _build_prompt(config, messages, user_input)
-                # prime the stream so first token is ready before we clear status
-                stream = ollama.chat(
-                    model=config["model"],
-                    messages=prompt,
-                    stream=True,
-                    options={"num_ctx": 4096},
-                )
-                first = next(stream, None)
+            console.print()
+            # step 1 — memory search
+            console.print("  [dim]searching memory…[/]", end="\r")
+            try:
+                future = _executor.submit(_fetch_memories, config, user_input)
+                facts = future.result(timeout=2.0)
+            except (FuturesTimeout, Exception):
+                facts = ""
+
+            # step 2 — build prompt
+            console.print("  [dim]building prompt…  [/]", end="\r")
+            prompt = _build_prompt_with_facts(config, messages, user_input, facts)
+
+            # step 3 — waiting for first token
+            console.print(f"  [dim]loading {config['model']}…[/]", end="\r")
+            stream = ollama.chat(
+                model=config["model"],
+                messages=prompt,
+                stream=True,
+                options={"num_ctx": 4096},
+            )
+            first = next(stream, None)
+            console.print(" " * 60, end="\r")  # clear the status line
 
             console.print()
             console.print(" [bold cyan]◆[/]  ", end="")
