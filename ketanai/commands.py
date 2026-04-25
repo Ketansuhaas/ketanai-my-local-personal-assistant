@@ -5,7 +5,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 from .config import save_config
-from .memory import get_memory, reset_memory
+from . import memory as mem
 from .session import load_session, save_session, list_sessions
 
 console = Console()
@@ -91,45 +91,39 @@ def handle(
             else:
                 config["model"] = args
                 save_config(config)
-                reset_memory()
+                mem.reset()
                 _ok(f"switched to [cyan]{args}[/]")
 
     elif verb == "/memory":
-        mem = get_memory(config)
-        query = args or "user"
-        results = mem.search(query, filters={"user_id": config["user_id"]}, limit=10)
-        memories = results.get("results", [])
+        query = args or None
+        memories = mem.all_memories(config) if not query else [
+            {"id": "search", "memory": f} for f in mem.search(query, config, limit=10)
+        ]
         console.print()
         console.print(Rule("long-term memory", style="cyan dim"))
         if not memories:
             console.print("  [dim]nothing stored yet.[/]")
         else:
             for i, m in enumerate(memories, 1):
-                console.print(f"  [dim cyan]{i:>2}.[/]  {m['memory']}  [dim]·  {m['id'][:8]}[/]")
+                console.print(f"  [dim cyan]{i:>2}.[/]  {m['memory']}  [dim]·  {m['id']}[/]")
         console.print()
 
     elif verb == "/remember":
         if not args:
             _err("usage: /remember <fact>")
         else:
-            mem = get_memory(config)
-            mem.add(args, user_id=config["user_id"])
+            mem.remember(args, config)
             _ok(f"remembered: [dim]{args}[/]")
 
     elif verb == "/forget":
         if not args:
             _err("usage: /forget <query>")
         else:
-            mem = get_memory(config)
-            results = mem.search(args, filters={"user_id": config["user_id"]}, limit=5)
-            memories = results.get("results", [])
-            if not memories:
+            count = mem.forget(args, config)
+            if count == 0:
                 console.print("  [dim]no matching memories.[/]")
             else:
-                for m in memories:
-                    mem.delete(m["id"])
-                    console.print(f"  [red dim]✗[/]  {m['memory']}")
-                _ok(f"deleted {len(memories)} memory(s)")
+                _ok(f"deleted {count} memory(s)")
 
     elif verb == "/sessions":
         sessions = list_sessions()

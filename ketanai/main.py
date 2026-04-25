@@ -1,14 +1,15 @@
 import sys
+import subprocess
 import threading
 import ollama
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.rule import Rule
 from rich.text import Text
 
 from .config import load_config, save_config
-from .memory import get_memory
+from . import memory as mem
 from .session import new_session_id, save_session, title_from_message, rename_session
 from . import commands
 
@@ -22,10 +23,13 @@ BANNER = """\
  ██║  ██╗███████╗   ██║   ██║  ██║██║ ╚████║██║  ██║██║
  ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝"""
 
+_executor = ThreadPoolExecutor(max_workers=2)
+
 
 def _print_banner(config: dict, session_id: str):
     console.print()
     console.print(BANNER, style="bold bright_cyan")
+    console.print(Text("                                               ketan.ai", style="dim cyan italic"))
     console.print()
     console.print(Rule(style="bright_cyan dim"))
     meta = Text()
@@ -41,21 +45,25 @@ def _print_banner(config: dict, session_id: str):
     console.print()
 
 
+def _fetch_memories(config: dict, user_input: str) -> str:
+    facts = mem.search(user_input, config, limit=5)
+    return "\n".join(f"- {f}" for f in facts) if facts else ""
+
+
 def _build_prompt(config: dict, messages: list[dict], user_input: str) -> list[dict]:
-    mem = get_memory(config)
-    results = mem.search(user_input, filters={"user_id": config["user_id"]}, limit=5)
-    memories = results.get("results", [])
+    # fetch memories with a 2s timeout — never block the prompt
+    try:
+        future = _executor.submit(_fetch_memories, config, user_input)
+        facts = future.result(timeout=2.0)
+    except (FuturesTimeout, Exception):
+        facts = ""
 
     system = (
         "You are KetanAI, a personal assistant with persistent long-term memory. "
         "You DO have memory of past conversations — facts are retrieved and shown below. "
         "Never claim you lack memory. If no facts are listed, you simply haven't learned anything yet."
     )
-    if memories:
-        facts = "\n".join(f"- {m['memory']}" for m in memories)
-        system += f"\n\nKnown facts about the user:\n{facts}"
-    else:
-        system += "\n\nNo facts stored yet for this user."
+    system += f"\n\nKnown facts about the user:\n{facts}" if facts else "\n\nNo facts stored yet."
 
     return (
         [{"role": "system", "content": system}]
@@ -65,14 +73,10 @@ def _build_prompt(config: dict, messages: list[dict], user_input: str) -> list[d
 
 
 def _store_memory(config: dict, user_input: str, reply: str):
-    mem = get_memory(config)
-    mem.add(
-        [
-            {"role": "user", "content": user_input},
-            {"role": "assistant", "content": reply},
-        ],
-        user_id=config["user_id"],
-    )
+    try:
+        mem.add(user_input, reply, config)
+    except Exception:
+        pass
 
 
 def _pick_model_interactively(config: dict) -> dict:
@@ -106,6 +110,14 @@ def _pick_model_interactively(config: dict) -> dict:
     return config
 
 
+def _shutdown():
+    save = console.input("\n [dim]stop ollama service? [y/N][/]  ").strip().lower()
+    if save == "y":
+        subprocess.run(["brew", "services", "stop", "ollama"],
+                       capture_output=True)
+        console.print(Text("  ollama stopped.", style="dim"))
+
+
 def main():
     config = load_config()
     config = _pick_model_interactively(config)
@@ -123,6 +135,7 @@ def main():
             console.print()
             console.print(Rule(style="dim"))
             console.print(Text("  session saved. goodbye.", style="dim italic"))
+            _shutdown()
             console.print()
             break
 
@@ -136,6 +149,7 @@ def main():
                     user_input, config, session_id, messages
                 )
                 if should_exit:
+                    _shutdown()
                     break
                 continue
             user_input = user_input.lstrip("/")
@@ -147,13 +161,20 @@ def main():
             console.print(" [bold cyan]◆[/]  ", end="")
 
             reply_chunks = []
-            for chunk in ollama.chat(model=config["model"], messages=prompt, stream=True):
+            for chunk in ollama.chat(
+                model=config["model"],
+                messages=prompt,
+                stream=True,
+                options={"num_ctx": 4096},   # keep context small = fast first token
+            ):
                 token = chunk["message"]["content"]
                 reply_chunks.append(token)
                 print(token, end="", flush=True)
             print()
 
             reply = "".join(reply_chunks)
+
+            # store memory in background — never blocks the prompt
             threading.Thread(
                 target=_store_memory, args=(config, user_input, reply), daemon=True
             ).start()
