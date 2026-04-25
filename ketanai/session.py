@@ -5,7 +5,7 @@ from .config import SESSIONS_DIR
 
 
 def new_session_id() -> str:
-    return datetime.now().strftime("%Y-%m-%d_%H%M")
+    return datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
 
 def title_from_message(text: str) -> str:
