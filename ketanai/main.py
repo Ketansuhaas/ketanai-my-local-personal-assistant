@@ -208,18 +208,28 @@ def main():
             user_input = user_input.lstrip("/")
 
         try:
-            prompt = _build_prompt(config, messages, user_input)
+            with console.status(
+                "[dim cyan]  ⟳  thinking…[/]", spinner="dots", spinner_style="cyan dim"
+            ):
+                prompt = _build_prompt(config, messages, user_input)
+                # prime the stream so first token is ready before we clear status
+                stream = ollama.chat(
+                    model=config["model"],
+                    messages=prompt,
+                    stream=True,
+                    options={"num_ctx": 4096},
+                )
+                first = next(stream, None)
 
             console.print()
             console.print(" [bold cyan]◆[/]  ", end="")
 
             reply_chunks = []
-            for chunk in ollama.chat(
-                model=config["model"],
-                messages=prompt,
-                stream=True,
-                options={"num_ctx": 4096},   # keep context small = fast first token
-            ):
+            if first:
+                token = first["message"]["content"]
+                reply_chunks.append(token)
+                print(token, end="", flush=True)
+            for chunk in stream:
                 token = chunk["message"]["content"]
                 reply_chunks.append(token)
                 print(token, end="", flush=True)
