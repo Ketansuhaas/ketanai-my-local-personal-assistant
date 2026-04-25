@@ -79,11 +79,40 @@ def _store_memory(config: dict, user_input: str, reply: str):
         pass
 
 
+_started_ollama = False
+
+
+def _ensure_ollama() -> bool:
+    """Start ollama if not running. Returns True if we started it."""
+    try:
+        ollama.list()
+        return False  # already running
+    except Exception:
+        console.print(Text("  starting ollama...", style="dim"))
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        import time
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                ollama.list()
+                return True
+            except Exception:
+                pass
+        console.print("[red]✗  Could not start Ollama.[/]")
+        sys.exit(1)
+
+
 def _pick_model_interactively(config: dict) -> dict:
+    global _started_ollama
+    _started_ollama = _ensure_ollama()
     try:
         models = [m.model for m in ollama.list().models if "embed" not in m.model]
     except Exception:
-        console.print("[red]✗  Cannot connect to Ollama.[/]  Run: [dim]ollama serve[/]")
+        console.print("[red]✗  Cannot connect to Ollama.[/]")
         sys.exit(1)
 
     if not models:
@@ -111,10 +140,8 @@ def _pick_model_interactively(config: dict) -> dict:
 
 
 def _shutdown():
-    save = console.input("\n [dim]stop ollama service? [y/N][/]  ").strip().lower()
-    if save == "y":
-        subprocess.run(["brew", "services", "stop", "ollama"],
-                       capture_output=True)
+    if _started_ollama:
+        subprocess.run(["killall", "ollama"], capture_output=True)
         console.print(Text("  ollama stopped.", style="dim"))
 
 
