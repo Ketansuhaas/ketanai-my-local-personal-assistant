@@ -7,7 +7,7 @@ CHROMA_DIR = DATA_DIR / "chroma_db"
 CONFIG_FILE = DATA_DIR / "config.json"
 
 DEFAULTS = {
-    "model": "gemma4:e2b",
+    "model": "llama3.2:1b",
     "embed_model": "nomic-embed-text",
     "user_id": "ketan",
     "ollama_url": "http://localhost:11434",

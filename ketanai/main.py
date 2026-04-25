@@ -52,38 +52,12 @@ def _fetch_memories(config: dict, user_input: str) -> str:
 
 def _build_prompt_with_facts(config: dict, messages: list[dict], user_input: str, facts: str) -> list[dict]:
 
-    system = f"""You are KetanAI — a local personal AI assistant built by Ketan.
-
-IDENTITY & SETUP
-- You run entirely on this machine. No cloud, no API keys.
-- LLM: {config['model']} served by Ollama (http://localhost:11434)
-- Embeddings: {config['embed_model']} (used for memory search)
-- Source code: ~/Desktop/personalAI/
-- Memory + sessions: ~/.ketanai/
-
-MEMORY SYSTEM
-- Long-term memory persists across ALL sessions, stored in ChromaDB (~/.ketanai/chroma_db/)
-- Relevant facts are retrieved before every response and injected below
-- New facts are extracted and stored automatically after each exchange
-- You HAVE memory. Never claim otherwise. If no facts are listed, nothing has been stored yet.
-
-COMMANDS THE USER CAN RUN
-- /model [name]    — view or switch the active Ollama model
-- /models          — list all installed Ollama models
-- /memory [query]  — browse stored long-term memories
-- /remember <fact> — explicitly store a fact
-- /forget <query>  — delete memories matching a query
-- /sessions        — list past chat sessions
-- /load <id>       — resume a past session
-- /exit            — save session and quit
-
-SESSION BEHAVIOUR
-- Every terminal launch is a new session
-- Sessions are auto-named from the first message (e.g. 2026-04-24_what-is-rust)
-- Session history (last 10 messages) is included as conversation context
-- Long-term memory is separate from session history and never expires"""
-
-    system += f"\n\nKNOWN FACTS ABOUT THE USER:\n{facts}" if facts else "\n\nNo facts stored yet for this user."
+    system = (
+        f"You are KetanAI, a local personal assistant running on {config['model']} via Ollama. "
+        "You have persistent long-term memory across all sessions — facts retrieved from memory are listed below. "
+        "Never claim you lack memory. If no facts appear, nothing has been stored yet."
+    )
+    system += f"\n\nMemory:\n{facts}" if facts else ""
 
     return (
         [{"role": "system", "content": system}]
