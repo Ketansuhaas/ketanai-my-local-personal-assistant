@@ -20,7 +20,8 @@ def rename_session(old_id: str, new_id: str) -> str:
     new_path = SESSIONS_DIR / f"{new_id}.json"
     if old_path.exists() and not new_path.exists():
         old_path.rename(new_path)
-    return new_id
+        return new_id
+    return old_id  # collision — keep timestamp ID
 
 
 def load_session(session_id: str) -> list[dict]:
@@ -39,7 +40,7 @@ def save_session(session_id: str, messages: list[dict]):
 
 def list_sessions() -> list[dict]:
     sessions = []
-    for f in sorted(SESSIONS_DIR.glob("*.json"), reverse=True):
+    for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             msgs = json.loads(f.read_text())
             first_user = next((m["content"] for m in msgs if m["role"] == "user"), "")
