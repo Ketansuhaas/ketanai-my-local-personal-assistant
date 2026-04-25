@@ -1,0 +1,164 @@
+import sys
+import ollama
+from datetime import datetime
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.rule import Rule
+from rich.text import Text
+from rich.columns import Columns
+
+from .config import load_config, save_config
+from .memory import get_memory
+from .session import new_session_id, save_session, title_from_message, rename_session
+from . import commands
+
+console = Console()
+
+BANNER = """\
+ ██╗  ██╗███████╗████████╗ █████╗ ███╗   ██╗ █████╗ ██╗
+ ██║ ██╔╝██╔════╝╚══██╔══╝██╔══██╗████╗  ██║██╔══██╗██║
+ █████╔╝ █████╗     ██║   ███████║██╔██╗ ██║███████║██║
+ ██╔═██╗ ██╔══╝     ██║   ██╔══██║██║╚██╗██║██╔══██║██║
+ ██║  ██╗███████╗   ██║   ██║  ██║██║ ╚████║██║  ██║██║
+ ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝"""
+
+
+def _print_banner(config: dict, session_id: str):
+    console.print()
+    console.print(BANNER, style="bold bright_cyan")
+    console.print()
+    console.print(Rule(style="bright_cyan dim"))
+    meta = Text()
+    meta.append("  model  ", style="dim")
+    meta.append(config["model"], style="bold cyan")
+    meta.append("     session  ", style="dim")
+    meta.append(session_id, style="bold cyan")
+    meta.append("     ", style="dim")
+    meta.append(datetime.now().strftime("%Y-%m-%d %H:%M"), style="dim")
+    console.print(meta)
+    console.print(Rule(style="bright_cyan dim"))
+    console.print(Text("  type /help for commands", style="dim italic"))
+    console.print()
+
+
+def _build_prompt(config: dict, messages: list[dict], user_input: str) -> list[dict]:
+    mem = get_memory(config)
+    results = mem.search(user_input, filters={"user_id": config["user_id"]}, limit=5)
+    memories = results.get("results", [])
+
+    system = "You are KetanAI, a sharp personal assistant with long-term memory. Be helpful and concise."
+    if memories:
+        facts = "\n".join(f"- {m['memory']}" for m in memories)
+        system += f"\n\nWhat you remember about the user:\n{facts}"
+
+    return (
+        [{"role": "system", "content": system}]
+        + messages[-10:]
+        + [{"role": "user", "content": user_input}]
+    )
+
+
+def _store_memory(config: dict, user_input: str, reply: str):
+    mem = get_memory(config)
+    mem.add(
+        [
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": reply},
+        ],
+        user_id=config["user_id"],
+    )
+
+
+def _pick_model_interactively(config: dict) -> dict:
+    try:
+        models = [m.model for m in ollama.list().models if "embed" not in m.model]
+    except Exception:
+        console.print("[red]✗  Cannot connect to Ollama.[/]  Run: [dim]ollama serve[/]")
+        sys.exit(1)
+
+    if not models:
+        console.print("[red]✗  No chat models installed.[/]  Run: [dim]ollama pull gemma4:e2b[/]")
+        sys.exit(1)
+
+    if config["model"] in models:
+        return config
+
+    console.print()
+    console.print(Rule("select a model", style="yellow"))
+    for i, m in enumerate(models, 1):
+        console.print(f"  [dim]{i:>2}.[/]  [cyan]{m}[/]")
+    console.print()
+    choice = console.input("[yellow]❯[/] ").strip()
+    if choice.isdigit() and 1 <= int(choice) <= len(models):
+        config["model"] = models[int(choice) - 1]
+    elif choice in models:
+        config["model"] = choice
+    else:
+        config["model"] = models[0]
+
+    save_config(config)
+    return config
+
+
+def main():
+    config = load_config()
+    config = _pick_model_interactively(config)
+
+    session_id = new_session_id()
+    messages: list[dict] = []
+
+    _print_banner(config, session_id)
+
+    while True:
+        try:
+            user_input = console.input("\n [bold bright_cyan]❯[/]  ").strip()
+        except (KeyboardInterrupt, EOFError):
+            save_session(session_id, messages)
+            console.print()
+            console.print(Rule(style="dim"))
+            console.print(Text("  session saved. goodbye.", style="dim italic"))
+            console.print()
+            break
+
+        if not user_input:
+            continue
+
+        if user_input.startswith("/"):
+            verb = user_input.split()[0].lower()
+            if verb in commands.KNOWN_VERBS:
+                session_id, messages, should_exit = commands.handle(
+                    user_input, config, session_id, messages
+                )
+                if should_exit:
+                    break
+                continue
+            user_input = user_input.lstrip("/")
+
+        try:
+            prompt = _build_prompt(config, messages, user_input)
+
+            console.print()
+            console.print(" [bold cyan]◆[/]  ", end="")
+
+            reply_chunks = []
+            for chunk in ollama.chat(model=config["model"], messages=prompt, stream=True):
+                token = chunk["message"]["content"]
+                reply_chunks.append(token)
+                print(token, end="", flush=True)
+            print()
+
+            reply = "".join(reply_chunks)
+            _store_memory(config, user_input, reply)
+
+            messages.append({"role": "user", "content": user_input})
+            messages.append({"role": "assistant", "content": reply})
+
+            if len(messages) == 2:
+                date = session_id.split("_")[0]
+                new_id = f"{date}_{title_from_message(user_input)}"
+                session_id = rename_session(session_id, new_id)
+
+            save_session(session_id, messages)
+
+        except Exception as e:
+            console.print(f"\n [red]✗[/]  {e}")
