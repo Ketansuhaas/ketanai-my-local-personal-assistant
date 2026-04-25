@@ -202,9 +202,18 @@ def main():
             user_input = user_input.lstrip("/")
 
         try:
-            console.print()
+            print()
+
+            def status(msg: str):
+                sys.stdout.write(f"\r  \033[2m{msg}\033[0m" + " " * 10)
+                sys.stdout.flush()
+
+            def clear_status():
+                sys.stdout.write("\r" + " " * 60 + "\r")
+                sys.stdout.flush()
+
             # step 1 — memory search
-            console.print("  [dim]searching memory…[/]", end="\r")
+            status("searching memory…")
             try:
                 future = _executor.submit(_fetch_memories, config, user_input)
                 facts = future.result(timeout=2.0)
@@ -212,11 +221,11 @@ def main():
                 facts = ""
 
             # step 2 — build prompt
-            console.print("  [dim]building prompt…  [/]", end="\r")
+            status("building prompt…")
             prompt = _build_prompt_with_facts(config, messages, user_input, facts)
 
-            # step 3 — waiting for first token
-            console.print(f"  [dim]loading {config['model']}…[/]", end="\r")
+            # step 3 — sending to model, waiting for first token
+            status(f"generating response…")
             stream = ollama.chat(
                 model=config["model"],
                 messages=prompt,
@@ -224,25 +233,27 @@ def main():
                 options={"num_ctx": 4096},
             )
             first = next(stream, None)
-            console.print(" " * 60, end="\r")  # clear the status line
+            clear_status()
 
-            console.print()
-            console.print(" [bold cyan]◆[/]  ", end="")
-
+            # stream output
+            sys.stdout.write(" \033[1;36m◆\033[0m  ")
+            sys.stdout.flush()
             reply_chunks = []
             if first:
                 token = first["message"]["content"]
                 reply_chunks.append(token)
-                print(token, end="", flush=True)
+                sys.stdout.write(token)
+                sys.stdout.flush()
             for chunk in stream:
                 token = chunk["message"]["content"]
                 reply_chunks.append(token)
-                print(token, end="", flush=True)
+                sys.stdout.write(token)
+                sys.stdout.flush()
             print()
 
             reply = "".join(reply_chunks)
 
-            # store memory in background — never blocks the prompt
+            # store memory in background
             threading.Thread(
                 target=_store_memory, args=(config, user_input, reply), daemon=True
             ).start()
@@ -257,5 +268,8 @@ def main():
 
             save_session(session_id, messages)
 
+        except KeyboardInterrupt:
+            console.print(" " * 60, end="\r")
+            console.print("  [dim]interrupted.[/]")
         except Exception as e:
             console.print(f"\n [red]✗[/]  {e}")
