@@ -53,9 +53,10 @@ def _fetch_memories(config: dict, user_input: str) -> str:
 def _build_prompt_with_facts(config: dict, messages: list[dict], user_input: str, facts: str) -> list[dict]:
 
     system = (
-        f"You are KetanAI, a local personal assistant running on {config['model']} via Ollama. "
-        "You have persistent long-term memory across all sessions — facts retrieved from memory are listed below. "
-        "Never claim you lack memory. If no facts appear, nothing has been stored yet."
+        f"You are KetanAI, an AI assistant built by Ketan and running locally on {config['model']} via Ollama. "
+        "You are NOT Ketan — Ketan is the human user you are talking to. "
+        "You have persistent long-term memory across all sessions. "
+        "Never claim you lack memory. If no facts appear below, nothing has been stored yet."
     )
     system += f"\n\nMemory:\n{facts}" if facts else ""
 

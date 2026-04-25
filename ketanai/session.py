@@ -5,10 +5,7 @@ from .config import SESSIONS_DIR
 
 
 def new_session_id() -> str:
-    date = datetime.now().strftime("%Y-%m-%d")
-    existing = sorted(SESSIONS_DIR.glob(f"{date}_*.json"))
-    idx = len(existing) + 1
-    return f"{date}_{idx:03d}"
+    return datetime.now().strftime("%Y-%m-%d_%H%M")
 
 
 def title_from_message(text: str) -> str:
